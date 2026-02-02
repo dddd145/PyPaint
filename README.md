@@ -35,9 +35,13 @@ NumPy
 
 ## 📦 セットアップ・実行方法
 ライブラリのインストール
-```bash pip install PySide6 opencv-python numpy```
+```bash
+pip install PySide6 opencv-python numpy
+```
 アプリケーションの起動
-```python main.py```
+```bash
+python main.py
+```
 💡 使い方
 描画: キャンバス上を左クリックでドラッグします。
 
