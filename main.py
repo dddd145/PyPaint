@@ -20,6 +20,10 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     self.current_bg_color = (255, 255, 255)
     self.current_brush_color = (0, 0, 0)
 
+    # Undo用スタック (最大30手まで保持)
+    self.undo_stack: typing.List[np.ndarray] = []
+    self.max_undo = 30
+
     self.init_ui()
     self.create_blank_canvas(800, 600)
 
@@ -47,9 +51,13 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     self.eraser_btn.clicked.connect(self.toggle_eraser)
     draw_layout.addWidget(self.eraser_btn)
 
+    # Undoボタン
+    self.undo_btn = PySide6.QtWidgets.QPushButton("元に戻す (Ctrl+Z)")
+    self.undo_btn.clicked.connect(self.undo)
+    draw_layout.addWidget(self.undo_btn)
+
     self.clear_btn = PySide6.QtWidgets.QPushButton("キャンバスをクリア")
-    self.clear_btn.clicked.connect(
-        lambda: self.create_blank_canvas(800, 600))
+    self.clear_btn.clicked.connect(self.clear_canvas_with_undo)
     draw_layout.addWidget(self.clear_btn)
 
     # 背景色変更
@@ -87,6 +95,11 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
         "background-color: #333; border: 2px solid #555;")
     main_layout.addWidget(self.canvas, 4)
 
+    # ショートカットの設定
+    self.undo_shortcut = PySide6.QtGui.QShortcut(
+        PySide6.QtGui.QKeySequence("Ctrl+Z"), self)
+    self.undo_shortcut.activated.connect(self.undo)
+
   def _create_slider(self, label: str, min_v: int, max_v: int, init_v: int, layout: PySide6.QtWidgets.QVBoxLayout) -> PySide6.QtWidgets.QSlider:
     layout.addWidget(PySide6.QtWidgets.QLabel(label))
     slider = PySide6.QtWidgets.QSlider(PySide6.QtCore.Qt.Horizontal)
@@ -95,6 +108,19 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     slider.valueChanged.connect(self.apply_effects)
     layout.addWidget(slider)
     return slider
+
+  def save_undo_state(self):
+    """現在の状態をスタックに保存"""
+    if self.raw_image is not None:
+      self.undo_stack.append(self.raw_image.copy())
+      if len(self.undo_stack) > self.max_undo:
+        self.undo_stack.pop(0)
+
+  def undo(self):
+    """一画前の状態に戻す"""
+    if self.undo_stack:
+      self.raw_image = self.undo_stack.pop()
+      self.apply_effects()
 
   def toggle_eraser(self):
     self.eraser_mode = self.eraser_btn.isChecked()
@@ -109,6 +135,7 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
   def change_bg_color(self):
     color = PySide6.QtWidgets.QColorDialog.getColor()
     if color.isValid() and self.raw_image is not None:
+      self.save_undo_state()  # 色変更前に保存
       self.current_bg_color = (color.blue(), color.green(), color.red())
       self.raw_image[:] = self.current_bg_color
       self.apply_effects()
@@ -116,12 +143,20 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
   def create_blank_canvas(self, w: int, h: int):
     self.current_bg_color = (255, 255, 255)
     self.raw_image = np.full((h, w, 3), 255, dtype=np.uint8)
+    self.undo_stack.clear()  # キャンバス作成時はリセット
+    self.apply_effects()
+
+  def clear_canvas_with_undo(self):
+    """Undo対応のクリア"""
+    self.save_undo_state()
+    self.raw_image[:] = self.current_bg_color
     self.apply_effects()
 
   def load_file(self) -> None:
     path, _ = PySide6.QtWidgets.QFileDialog.getOpenFileName(
         self, "画像選択", "", "Images (*.png *.jpg *.jpeg)")
     if path:
+      self.save_undo_state()
       file_bytes = np.fromfile(path, np.uint8)
       self.raw_image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
       self.current_bg_color = tuple(map(int, self.raw_image[0, 0]))
@@ -133,13 +168,13 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     path, _ = PySide6.QtWidgets.QFileDialog.getSaveFileName(
         self, "画像を保存", "output.png", "PNG (*.png);;JPEG (*.jpg *.jpeg)")
     if path:
-      # 日本語パス対応のために imencode を使用
       ext = ".png" if path.lower().endswith(".png") else ".jpg"
       _, res = cv2.imencode(ext, self.raw_image)
       res.tofile(path)
 
   def mousePressEvent(self, event: PySide6.QtGui.QMouseEvent) -> None:
     if event.button() == PySide6.QtCore.Qt.LeftButton:
+      self.save_undo_state()  # 描き始める前に保存
       pos = self.get_canvas_coordinates(event.pos())
       self.last_point = pos
       self.start_point = pos
