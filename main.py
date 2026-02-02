@@ -72,9 +72,13 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     # ファイル操作
     self.load_btn = PySide6.QtWidgets.QPushButton("画像読み込み")
     self.load_btn.clicked.connect(self.load_file)
+    side_panel.addWidget(self.load_btn)
+
+    self.save_btn = PySide6.QtWidgets.QPushButton("画像を保存")
+    self.save_btn.clicked.connect(self.save_file)
+    side_panel.addWidget(self.save_btn)
 
     side_panel.addStretch()
-    side_panel.addWidget(self.load_btn)
     main_layout.addLayout(side_panel, 1)
 
     self.canvas = PySide6.QtWidgets.QLabel()
@@ -122,6 +126,17 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
       self.raw_image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
       self.current_bg_color = tuple(map(int, self.raw_image[0, 0]))
       self.apply_effects()
+
+  def save_file(self) -> None:
+    if self.raw_image is None:
+      return
+    path, _ = PySide6.QtWidgets.QFileDialog.getSaveFileName(
+        self, "画像を保存", "output.png", "PNG (*.png);;JPEG (*.jpg *.jpeg)")
+    if path:
+      # 日本語パス対応のために imencode を使用
+      ext = ".png" if path.lower().endswith(".png") else ".jpg"
+      _, res = cv2.imencode(ext, self.raw_image)
+      res.tofile(path)
 
   def mousePressEvent(self, event: PySide6.QtGui.QMouseEvent) -> None:
     if event.button() == PySide6.QtCore.Qt.LeftButton:
