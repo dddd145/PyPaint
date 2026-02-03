@@ -22,6 +22,9 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     self.current_bg_color = (255, 255, 255)
     self.current_brush_color = (0, 0, 0)
 
+    # --- ズーム用変数 ---
+    self.zoom_factor = 1.0
+
     # 描画モード用 (0: ブラシ, 1: 矩形, 2: 円, 3: 塗りつぶし)
     self.draw_mode = 0
     self.is_modified = False
@@ -185,6 +188,7 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     self.undo_stack.clear()
     self.redo_stack.clear()
     self.is_modified = False
+    self.zoom_factor = 1.0  # ズームリセット
     self.apply_effects()
 
   def clear_canvas_with_undo(self):
@@ -201,6 +205,7 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
       self.raw_image = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
       self.current_bg_color = tuple(map(int, self.raw_image[0, 0]))
       self.is_modified = True
+      self.zoom_factor = 1.0
       self.apply_effects()
 
   def save_file(self) -> bool:
@@ -215,6 +220,20 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
       return True
     return False
 
+  def wheelEvent(self, event: PySide6.QtGui.QWheelEvent) -> None:
+    # Ctrl + ホイールでズーム倍率を変更
+    if event.modifiers() & PySide6.QtCore.Qt.ControlModifier:
+      delta = event.angleDelta().y()
+      if delta > 0:
+        self.zoom_factor *= 1.1
+      else:
+        self.zoom_factor /= 1.1
+      # 範囲制限（0.1倍〜10倍）
+      self.zoom_factor = max(0.1, min(self.zoom_factor, 10.0))
+      self.apply_effects()
+    else:
+      super().wheelEvent(event)
+
   def mousePressEvent(self, event: PySide6.QtGui.QMouseEvent) -> None:
     if event.button() == PySide6.QtCore.Qt.LeftButton:
       pos = self.get_canvas_coordinates(event.pos())
@@ -222,11 +241,8 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
 
       self.save_undo_state()
 
-      # 塗りつぶしモードの場合、クリックした瞬間に実行
       if self.draw_mode == 3 and self.raw_image is not None:
         color = self.current_bg_color if self.eraser_mode else self.current_brush_color
-        # OpenCVのfloodFillを使用
-        # maskは画像サイズ+2である必要がある
         h, w = self.raw_image.shape[:2]
         mask = np.zeros((h + 2, w + 2), np.uint8)
         cv2.floodFill(self.raw_image, mask, (pos.x(), pos.y()), color)
@@ -242,7 +258,6 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     if not (event.buttons() & PySide6.QtCore.Qt.LeftButton) or not self.start_point or self.raw_image is None:
       return
 
-    # 塗りつぶしモード中は移動イベントを無視
     if self.draw_mode == 3: return
 
     current_point = self.get_canvas_coordinates(event.pos())
@@ -271,12 +286,10 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
         self.last_point = current_point
         self.apply_effects()
     else:
-      # 図形描画プレビュー
       self.apply_effects(preview_pos=current_point)
 
   def mouseReleaseEvent(self, event: PySide6.QtGui.QMouseEvent) -> None:
     if event.button() == PySide6.QtCore.Qt.LeftButton and self.start_point and self.raw_image is not None:
-      # 塗りつぶしモードはPress時に完了しているため除外
       if self.draw_mode == 3:
         self.last_point = None
         self.start_point = None
@@ -304,12 +317,16 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     if self.canvas.pixmap() is None or self.raw_image is None: return None
     lbl_w, lbl_h = self.canvas.width(), self.canvas.height()
     img_h, img_w = self.raw_image.shape[:2]
-    ratio = min(lbl_w / img_w, lbl_h / img_h)
+
+    # ズーム倍率を適用した比率
+    ratio = min(lbl_w / img_w, lbl_h / img_h) * self.zoom_factor
+
     offset_x = (lbl_w - img_w * ratio) / 2
     offset_y = (lbl_h - img_h * ratio) / 2
     rel_x = pos.x() - self.canvas.x() - offset_x
     rel_y = pos.y() - self.canvas.y() - offset_y
     px, py = rel_x / ratio, rel_y / ratio
+
     angle = self.rotate_slider.value()
     if angle != 0:
       matrix = cv2.getRotationMatrix2D((img_w / 2, img_h / 2), angle, 1.0)
@@ -317,6 +334,7 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
       point = np.array([px, py, 1.0])
       original_point = inv_matrix @ point
       px, py = original_point[0], original_point[1]
+
     x, y = int(px), int(py)
     if 0 <= x < img_w and 0 <= y < img_h: return PySide6.QtCore.QPoint(x, y)
     return None
@@ -325,7 +343,6 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     if self.raw_image is None: return
     img = self.raw_image.copy()
 
-    # ドラッグ中のプレビュー描画
     if preview_pos and self.start_point:
       color = self.current_bg_color if self.eraser_mode else self.current_brush_color
       thickness = self.brush_size_slider.value()
@@ -338,7 +355,6 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
             np.sqrt((preview_pos.x() - center[0])**2 + (preview_pos.y() - center[1])**2))
         cv2.circle(img, center, radius, color, thickness)
 
-    # エフェクト適用
     effect_type = self.effect_slider.value()
     if effect_type == 1:
       gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -373,8 +389,13 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     q_img = PySide6.QtGui.QImage(
         img.data, w, h, bytes_per_line, PySide6.QtGui.QImage.Format_BGR888)
     pixmap = PySide6.QtGui.QPixmap.fromImage(q_img)
-    self.canvas.setPixmap(pixmap.scaled(self.canvas.size(
-    ), PySide6.QtCore.Qt.KeepAspectRatio, PySide6.QtCore.Qt.SmoothTransformation))
+
+    # ズーム倍率を反映してスケーリング
+    target_size = self.canvas.size() * self.zoom_factor
+
+    self.canvas.setPixmap(pixmap.scaled(target_size,
+                                        PySide6.QtCore.Qt.KeepAspectRatio,
+                                        PySide6.QtCore.Qt.SmoothTransformation))
 
   def closeEvent(self, event: PySide6.QtGui.QCloseEvent) -> None:
     if not self.is_modified:
