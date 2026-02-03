@@ -204,7 +204,13 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     if preview_pos and self.start_point:
       color = self.current_bg_color if self.eraser_mode else self.current_brush_color
       thickness = self.brush_size_slider.value()
-      if self.draw_mode == 1:
+
+      # ブラシモード時のShift直線プレビュー
+      modifiers = PySide6.QtWidgets.QApplication.keyboardModifiers()
+      if self.draw_mode == 0 and modifiers & PySide6.QtCore.Qt.KeyboardModifier.ShiftModifier:
+        cv2.line(img, (self.start_point.x(), self.start_point.y()),
+                 (preview_pos.x(), preview_pos.y()), color, thickness)
+      elif self.draw_mode == 1:
         cv2.rectangle(img, (self.start_point.x(), self.start_point.y(
         )), (preview_pos.x(), preview_pos.y()), color, thickness)
       elif self.draw_mode == 2:
@@ -213,16 +219,16 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
             [preview_pos.x() - center[0], preview_pos.y() - center[1]]))
         cv2.circle(img, center, radius, color, thickness)
 
-    # --- エフェクト処理（修正版） ---
+    # --- エフェクト処理 ---
     eff = self.effect_slider.value()
-    if eff == 1:  # モノクロ
+    if eff == 1:
       img = cv2.cvtColor(cv2.cvtColor(
           img, cv2.COLOR_BGR2GRAY), cv2.COLOR_GRAY2BGR)
-    elif eff == 2:  # セピア
+    elif eff == 2:
       kernel = np.array(
           [[0.272, 0.534, 0.131], [0.349, 0.686, 0.168], [0.393, 0.769, 0.189]])
       img = cv2.transform(img, kernel)
-    elif eff == 3:  # エッジ
+    elif eff == 3:
       gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
       edge = cv2.adaptiveThreshold(
           gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 9, 8)
@@ -267,33 +273,46 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     if not (event.buttons() & PySide6.QtCore.Qt.MouseButton.LeftButton) or not self.start_point: return
     pos = self.get_canvas_coordinates(event.pos())
     if not pos: return
+
     if self.draw_mode == 0:
-      color = self.current_bg_color if self.eraser_mode else self.current_brush_color
-      thick = self.brush_size_slider.value()
-      if self.pressure_brush_mode:
-        now = time.time()
-        dist = np.linalg.norm(
-            [pos.x() - self.last_point.x(), pos.y() - self.last_point.y()])
-        v = dist / (now - self.last_time + 0.001)
-        self.current_velocity_size = self.current_velocity_size * \
-            0.8 + (thick * max(0.2, min(1.2, 80 / (v + 1)))) * 0.2
-        thick = int(self.current_velocity_size)
-        self.last_time = now
-      cv2.line(self.raw_image, (self.last_point.x(), self.last_point.y()),
-               (pos.x(), pos.y()), color, max(1, thick))
-      self.last_point = pos
-      self.apply_effects()
+      modifiers = event.modifiers()
+      if modifiers & PySide6.QtCore.Qt.KeyboardModifier.ShiftModifier:
+        # 直線プレビューのために再描画
+        self.apply_effects(preview_pos=pos)
+      else:
+        color = self.current_bg_color if self.eraser_mode else self.current_brush_color
+        thick = self.brush_size_slider.value()
+        if self.pressure_brush_mode:
+          now = time.time()
+          dist = np.linalg.norm(
+              [pos.x() - self.last_point.x(), pos.y() - self.last_point.y()])
+          v = dist / (now - self.last_time + 0.001)
+          self.current_velocity_size = self.current_velocity_size * \
+              0.8 + (thick * max(0.2, min(1.2, 80 / (v + 1)))) * 0.2
+          thick = int(self.current_velocity_size)
+          self.last_time = now
+        cv2.line(self.raw_image, (self.last_point.x(), self.last_point.y(
+        )), (pos.x(), pos.y()), color, max(1, thick))
+        self.last_point = pos
+        self.apply_effects()
     else: self.apply_effects(preview_pos=pos)
 
   def mouseReleaseEvent(self, event):
-    if self.start_point and self.draw_mode in [1, 2]:
+    if self.start_point:
       pos = self.get_canvas_coordinates(event.pos())
       if pos:
         color = self.current_bg_color if self.eraser_mode else self.current_brush_color
         thick = self.brush_size_slider.value()
-        if self.draw_mode == 1: cv2.rectangle(self.raw_image, (self.start_point.x(
-        ), self.start_point.y()), (pos.x(), pos.y()), color, thick)
-        else:
+        modifiers = event.modifiers()
+
+        # 通常ブラシモードでのShift直線確定
+        if self.draw_mode == 0 and modifiers & PySide6.QtCore.Qt.KeyboardModifier.ShiftModifier:
+          cv2.line(self.raw_image, (self.start_point.x(
+          ), self.start_point.y()), (pos.x(), pos.y()), color, thick)
+        elif self.draw_mode == 1:
+          cv2.rectangle(self.raw_image, (self.start_point.x(
+          ), self.start_point.y()), (pos.x(), pos.y()), color, thick)
+        elif self.draw_mode == 2:
           center = (self.start_point.x(), self.start_point.y())
           radius = int(np.linalg.norm(
               [pos.x() - center[0], pos.y() - center[1]]))
@@ -348,20 +367,16 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
       return True
     return False
 
-  # --- 修正：保存確認ダイアログの復活 ---
   def closeEvent(self, event: PySide6.QtGui.QCloseEvent):
     if not self.is_modified:
       event.accept()
       return
-
     reply = PySide6.QtWidgets.QMessageBox.question(
         self, "確認", "変更が保存されていません。終了する前に保存しますか？",
         PySide6.QtWidgets.QMessageBox.StandardButton.Save |
         PySide6.QtWidgets.QMessageBox.StandardButton.Discard |
         PySide6.QtWidgets.QMessageBox.StandardButton.Cancel,
-        PySide6.QtWidgets.QMessageBox.StandardButton.Save
-    )
-
+        PySide6.QtWidgets.QMessageBox.StandardButton.Save)
     if reply == PySide6.QtWidgets.QMessageBox.StandardButton.Save:
       if self.save_file(): event.accept()
       else: event.ignore()
