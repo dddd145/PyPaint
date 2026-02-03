@@ -22,7 +22,8 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     self.current_bg_color = (255, 255, 255)
     self.current_brush_color = (0, 0, 0)
 
-    # 変更があったかどうかを管理するフラグ
+    # 図形モード用 (0: ブラシ, 1: 矩形, 2: 円)
+    self.draw_mode = 0
     self.is_modified = False
 
     # --- 速度（筆圧）計算用の変数 ---
@@ -38,26 +39,32 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     self.create_blank_canvas(800, 600)
 
   def init_ui(self) -> None:
-    """UIコンポーネントの配置"""
     central_widget = PySide6.QtWidgets.QWidget()
     self.setCentralWidget(central_widget)
     main_layout = PySide6.QtWidgets.QHBoxLayout(central_widget)
 
     side_panel = PySide6.QtWidgets.QVBoxLayout()
 
-    # --- ブラシ・消しゴム設定グループ ---
-    draw_group = PySide6.QtWidgets.QGroupBox("ブラシ・消しゴム設定")
+    # --- ブラシ・図形設定グループ ---
+    draw_group = PySide6.QtWidgets.QGroupBox("ツール設定")
     draw_layout = PySide6.QtWidgets.QVBoxLayout()
 
     self.brush_size_slider = self._create_slider(
-        "基準サイズ", 1, 50, 5, draw_layout)
+        "サイズ", 1, 50, 5, draw_layout)
 
-    self.brush_mode_btn = PySide6.QtWidgets.QPushButton("通常ブラシ")
+    # モード選択ボタン
+    self.mode_combo = PySide6.QtWidgets.QComboBox()
+    self.mode_combo.addItems(["通常ブラシ", "矩形 (Rect)", "円 (Circle)"])
+    self.mode_combo.currentIndexChanged.connect(self.change_draw_mode)
+    draw_layout.addWidget(PySide6.QtWidgets.QLabel("描画モード:"))
+    draw_layout.addWidget(self.mode_combo)
+
+    self.brush_mode_btn = PySide6.QtWidgets.QPushButton("筆圧感度: OFF")
     self.brush_mode_btn.setCheckable(True)
     self.brush_mode_btn.clicked.connect(self.toggle_brush_mode)
     draw_layout.addWidget(self.brush_mode_btn)
 
-    self.brush_color_btn = PySide6.QtWidgets.QPushButton("ブラシの色を変える")
+    self.brush_color_btn = PySide6.QtWidgets.QPushButton("色を変える")
     self.brush_color_btn.clicked.connect(self.change_brush_color)
     draw_layout.addWidget(self.brush_color_btn)
 
@@ -75,35 +82,28 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     undo_redo_layout.addWidget(self.redo_btn)
     draw_layout.addLayout(undo_redo_layout)
 
-    self.clear_btn = PySide6.QtWidgets.QPushButton("キャンバスをクリア")
+    self.clear_btn = PySide6.QtWidgets.QPushButton("クリア")
     self.clear_btn.clicked.connect(self.clear_canvas_with_undo)
     draw_layout.addWidget(self.clear_btn)
-
-    self.bg_color_btn = PySide6.QtWidgets.QPushButton("背景色を変える")
-    self.bg_color_btn.clicked.connect(self.change_bg_color)
-    draw_layout.addWidget(self.bg_color_btn)
 
     draw_group.setLayout(draw_layout)
     side_panel.addWidget(draw_group)
 
     # --- 画像処理エフェクトグループ ---
-    proc_group = PySide6.QtWidgets.QGroupBox("画像処理エフェクト")
+    proc_group = PySide6.QtWidgets.QGroupBox("エフェクト")
     proc_layout = PySide6.QtWidgets.QVBoxLayout()
-
     self.rotate_slider = self._create_slider(
         "回転", -180, 180, 0, proc_layout)
     self.blur_slider = self._create_slider("ぼかし", 1, 51, 1, proc_layout)
-    self.effect_slider = self._create_slider(
-        "特殊効果 (なし/白黒/セピア/線画)", 0, 3, 0, proc_layout)
-
+    self.effect_slider = self._create_slider("特殊効果", 0, 3, 0, proc_layout)
     proc_group.setLayout(proc_layout)
     side_panel.addWidget(proc_group)
 
-    self.load_btn = PySide6.QtWidgets.QPushButton("画像読み込み")
+    self.load_btn = PySide6.QtWidgets.QPushButton("読み込み")
     self.load_btn.clicked.connect(self.load_file)
     side_panel.addWidget(self.load_btn)
 
-    self.save_btn = PySide6.QtWidgets.QPushButton("画像を保存")
+    self.save_btn = PySide6.QtWidgets.QPushButton("保存")
     self.save_btn.clicked.connect(self.save_file)
     side_panel.addWidget(self.save_btn)
 
@@ -130,19 +130,21 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     layout.addWidget(slider)
     return slider
 
+  def change_draw_mode(self, index):
+    self.draw_mode = index
+
   def toggle_brush_mode(self):
     self.pressure_brush_mode = self.brush_mode_btn.isChecked()
     self.brush_mode_btn.setText(
-        "筆圧ブラシ" if self.pressure_brush_mode else "通常ブラシ")
+        "筆圧感度: ON" if self.pressure_brush_mode else "筆圧感度: OFF")
 
   def save_undo_state(self):
-    """状態保存と同時に変更フラグを立てる"""
     if self.raw_image is not None:
       self.undo_stack.append(self.raw_image.copy())
       if len(self.undo_stack) > self.max_undo:
         self.undo_stack.pop(0)
       self.redo_stack.clear()
-      self.is_modified = True  # 変更あり
+      self.is_modified = True
 
   def undo(self):
     if self.undo_stack and self.raw_image is not None:
@@ -181,7 +183,7 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     self.raw_image = np.full((h, w, 3), 255, dtype=np.uint8)
     self.undo_stack.clear()
     self.redo_stack.clear()
-    self.is_modified = False  # 初期状態は変更なし
+    self.is_modified = False
     self.apply_effects()
 
   def clear_canvas_with_undo(self):
@@ -201,7 +203,6 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
       self.apply_effects()
 
   def save_file(self) -> bool:
-    """画像を保存し、成功したら変更フラグを下ろす"""
     if self.raw_image is None: return False
     path, _ = PySide6.QtWidgets.QFileDialog.getSaveFileName(
         self, "画像を保存", "output.png", "PNG (*.png);;JPEG (*.jpg *.jpeg)")
@@ -209,7 +210,7 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
       ext = ".png" if path.lower().endswith(".png") else ".jpg"
       _, res = cv2.imencode(ext, self.raw_image)
       res.tofile(path)
-      self.is_modified = False  # 保存したので変更なし状態へ
+      self.is_modified = False
       return True
     return False
 
@@ -223,38 +224,54 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
       self.current_velocity_size = self.brush_size_slider.value()
 
   def mouseMoveEvent(self, event: PySide6.QtGui.QMouseEvent) -> None:
-    if event.buttons() & PySide6.QtCore.Qt.LeftButton and self.last_point and not (event.modifiers() & PySide6.QtCore.Qt.ShiftModifier):
-      current_point = self.get_canvas_coordinates(event.pos())
-      if current_point and self.raw_image is not None:
-        base_size = self.brush_size_slider.value()
-        color = self.current_bg_color if self.eraser_mode else self.current_brush_color
+    if not (event.buttons() & PySide6.QtCore.Qt.LeftButton) or not self.start_point or self.raw_image is None:
+      return
 
+    current_point = self.get_canvas_coordinates(event.pos())
+    if not current_point: return
+
+    color = self.current_bg_color if self.eraser_mode else self.current_brush_color
+    thickness = self.brush_size_slider.value()
+
+    if self.draw_mode == 0:  # ブラシ
+      if self.last_point:
         if self.pressure_brush_mode:
           now = time.time()
           dt = now - self.last_time if now - self.last_time > 0 else 0.001
           dist = np.sqrt((current_point.x() - self.last_point.x())
                          ** 2 + (current_point.y() - self.last_point.y())**2)
           velocity = dist / dt
-          target_size = base_size * \
+          target_size = thickness * \
               max(0.2, min(1.5, 100 / (velocity + 1)))
           self.current_velocity_size = self.current_velocity_size * 0.7 + target_size * 0.3
-          draw_size = int(self.current_velocity_size)
+          draw_thickness = int(self.current_velocity_size)
           self.last_time = now
         else:
-          draw_size = base_size
-
-        cv2.line(self.raw_image, (self.last_point.x(), self.last_point.y()),
-                 (current_point.x(), current_point.y()), color, max(1, draw_size))
+          draw_thickness = thickness
+        cv2.line(self.raw_image, (self.last_point.x(), self.last_point.y(
+        )), (current_point.x(), current_point.y()), color, max(1, draw_thickness))
         self.last_point = current_point
         self.apply_effects()
+    else:
+      # 図形描画（ドラッグ中はプレビューを表示するためにapply_effectsを少し特殊に呼ぶ）
+      self.apply_effects(preview_pos=current_point)
 
   def mouseReleaseEvent(self, event: PySide6.QtGui.QMouseEvent) -> None:
-    if event.button() == PySide6.QtCore.Qt.LeftButton and (event.modifiers() & PySide6.QtCore.Qt.ShiftModifier):
+    if event.button() == PySide6.QtCore.Qt.LeftButton and self.start_point and self.raw_image is not None:
       end_point = self.get_canvas_coordinates(event.pos())
-      if self.start_point and end_point and self.raw_image is not None:
+      if end_point:
         color = self.current_bg_color if self.eraser_mode else self.current_brush_color
-        cv2.line(self.raw_image, (self.start_point.x(), self.start_point.y()),
-                 (end_point.x(), end_point.y()), color, self.brush_size_slider.value())
+        thickness = self.brush_size_slider.value()
+
+        if self.draw_mode == 1:  # 矩形確定
+          cv2.rectangle(self.raw_image, (self.start_point.x(), self.start_point.y(
+          )), (end_point.x(), end_point.y()), color, thickness)
+        elif self.draw_mode == 2:  # 円確定
+          center = (self.start_point.x(), self.start_point.y())
+          radius = int(
+              np.sqrt((end_point.x() - center[0])**2 + (end_point.y() - center[1])**2))
+          cv2.circle(self.raw_image, center, radius, color, thickness)
+
         self.apply_effects()
     self.last_point = None
     self.start_point = None
@@ -280,18 +297,31 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     if 0 <= x < img_w and 0 <= y < img_h: return PySide6.QtCore.QPoint(x, y)
     return None
 
-  def apply_effects(self) -> None:
-    if not hasattr(self, 'effect_slider') or self.raw_image is None: return
+  def apply_effects(self, preview_pos: typing.Optional[PySide6.QtCore.QPoint] = None) -> None:
+    if self.raw_image is None: return
     img = self.raw_image.copy()
 
+    # ドラッグ中の図形プレビュー描画
+    if preview_pos and self.start_point:
+      color = self.current_bg_color if self.eraser_mode else self.current_brush_color
+      thickness = self.brush_size_slider.value()
+      if self.draw_mode == 1:
+        cv2.rectangle(img, (self.start_point.x(), self.start_point.y(
+        )), (preview_pos.x(), preview_pos.y()), color, thickness)
+      elif self.draw_mode == 2:
+        center = (self.start_point.x(), self.start_point.y())
+        radius = int(
+            np.sqrt((preview_pos.x() - center[0])**2 + (preview_pos.y() - center[1])**2))
+        cv2.circle(img, center, radius, color, thickness)
+
+    # エフェクト適用
     effect_type = self.effect_slider.value()
     if effect_type == 1:
       gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
       img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
     elif effect_type == 2:
-      kernel = np.array([[0.272, 0.534, 0.131],
-                         [0.349, 0.686, 0.168],
-                         [0.393, 0.769, 0.189]])
+      kernel = np.array(
+          [[0.272, 0.534, 0.131], [0.349, 0.686, 0.168], [0.393, 0.769, 0.189]])
       img = cv2.transform(img, kernel)
     elif effect_type == 3:
       gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -323,30 +353,19 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     ), PySide6.QtCore.Qt.KeepAspectRatio, PySide6.QtCore.Qt.SmoothTransformation))
 
   def closeEvent(self, event: PySide6.QtGui.QCloseEvent) -> None:
-    """ウィンドウを閉じる際のイベント処理"""
-    # 変更がない場合はそのまま閉じる
     if not self.is_modified:
       event.accept()
       return
-
-    # 変更がある場合のみダイアログを表示
     reply = PySide6.QtWidgets.QMessageBox.question(
         self, "確認", "終了する前に保存しますか？",
-        PySide6.QtWidgets.QMessageBox.Save |
-        PySide6.QtWidgets.QMessageBox.Discard |
-        PySide6.QtWidgets.QMessageBox.Cancel,
+        PySide6.QtWidgets.QMessageBox.Save | PySide6.QtWidgets.QMessageBox.Discard | PySide6.QtWidgets.QMessageBox.Cancel,
         PySide6.QtWidgets.QMessageBox.Save
     )
-
     if reply == PySide6.QtWidgets.QMessageBox.Save:
-      if self.save_file():  # 保存成功なら閉じる
-        event.accept()
-      else:  # 保存ダイアログでキャンセルされたら閉じない
-        event.ignore()
-    elif reply == PySide6.QtWidgets.QMessageBox.Discard:
-      event.accept()  # 保存せずに終了
-    else:
-      event.ignore()  # 終了をキャンセル
+      if self.save_file(): event.accept()
+      else: event.ignore()
+    elif reply == PySide6.QtWidgets.QMessageBox.Discard: event.accept()
+    else: event.ignore()
 
 if __name__ == "__main__":
   app = PySide6.QtWidgets.QApplication(sys.argv)
