@@ -10,7 +10,7 @@ import PySide6.QtGui
 class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
   def __init__(self) -> None:
     super().__init__()
-    self.setWindowTitle("PyPainter")
+    self.setWindowTitle("PyPainter Pro")
     self.setMinimumSize(1000, 700)
 
     # 状態保持
@@ -41,30 +41,28 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
 
     side_panel = PySide6.QtWidgets.QVBoxLayout()
 
-    # ブラシ・消しゴム設定
+    # --- ブラシ・消しゴム設定 ---
     draw_group = PySide6.QtWidgets.QGroupBox("ブラシ・消しゴム設定")
     draw_layout = PySide6.QtWidgets.QVBoxLayout()
+
     self.brush_size_slider = self._create_slider(
         "基準サイズ", 1, 50, 5, draw_layout)
 
-    # ブラシモード切替
     self.brush_mode_btn = PySide6.QtWidgets.QPushButton("通常ブラシ")
     self.brush_mode_btn.setCheckable(True)
     self.brush_mode_btn.clicked.connect(self.toggle_brush_mode)
     draw_layout.addWidget(self.brush_mode_btn)
 
-    # ブラシの色変更
     self.brush_color_btn = PySide6.QtWidgets.QPushButton("ブラシの色を変える")
     self.brush_color_btn.clicked.connect(self.change_brush_color)
     draw_layout.addWidget(self.brush_color_btn)
 
-    # 消しゴム切り替え
     self.eraser_btn = PySide6.QtWidgets.QPushButton("消しゴム: OFF")
     self.eraser_btn.setCheckable(True)
     self.eraser_btn.clicked.connect(self.toggle_eraser)
     draw_layout.addWidget(self.eraser_btn)
 
-    # Undo/Redoボタン
+    # Undo/Redo
     undo_redo_layout = PySide6.QtWidgets.QHBoxLayout()
     self.undo_btn = PySide6.QtWidgets.QPushButton("Undo")
     self.undo_btn.clicked.connect(self.undo)
@@ -78,7 +76,6 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     self.clear_btn.clicked.connect(self.clear_canvas_with_undo)
     draw_layout.addWidget(self.clear_btn)
 
-    # 背景色変更
     self.bg_color_btn = PySide6.QtWidgets.QPushButton("背景色を変える")
     self.bg_color_btn.clicked.connect(self.change_bg_color)
     draw_layout.addWidget(self.bg_color_btn)
@@ -86,16 +83,20 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     draw_group.setLayout(draw_layout)
     side_panel.addWidget(draw_group)
 
-    # 画像処理
+    # --- 画像処理エフェクト ---
     proc_group = PySide6.QtWidgets.QGroupBox("画像処理エフェクト")
     proc_layout = PySide6.QtWidgets.QVBoxLayout()
+
     self.rotate_slider = self._create_slider(
         "回転", -180, 180, 0, proc_layout)
     self.blur_slider = self._create_slider("ぼかし", 1, 51, 1, proc_layout)
+    self.effect_slider = self._create_slider(
+        "特殊効果 (なし/白黒/セピア/線画)", 0, 3, 0, proc_layout)
+
     proc_group.setLayout(proc_layout)
     side_panel.addWidget(proc_group)
 
-    # ファイル操作
+    # --- ファイル操作 ---
     self.load_btn = PySide6.QtWidgets.QPushButton("画像読み込み")
     self.load_btn.clicked.connect(self.load_file)
     side_panel.addWidget(self.load_btn)
@@ -107,13 +108,14 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     side_panel.addStretch()
     main_layout.addLayout(side_panel, 1)
 
+    # --- キャンバス表示エリア ---
     self.canvas = PySide6.QtWidgets.QLabel()
     self.canvas.setAlignment(PySide6.QtCore.Qt.AlignCenter)
     self.canvas.setStyleSheet(
         "background-color: #333; border: 2px solid #555;")
     main_layout.addWidget(self.canvas, 4)
 
-    # ショートカットの設定
+    # ショートカット
     PySide6.QtGui.QShortcut(PySide6.QtGui.QKeySequence(
         "Ctrl+Z"), self).activated.connect(self.undo)
     PySide6.QtGui.QShortcut(PySide6.QtGui.QKeySequence(
@@ -218,13 +220,11 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
         color = self.current_bg_color if self.eraser_mode else self.current_brush_color
 
         if self.pressure_brush_mode:
-          # 速度による太さの変化
           now = time.time()
-          dt = now - self.last_time if now - self.last_time > 0 else 0.01
+          dt = now - self.last_time if now - self.last_time > 0 else 0.001
           dist = np.sqrt((current_point.x() - self.last_point.x())
                          ** 2 + (current_point.y() - self.last_point.y())**2)
           velocity = dist / dt
-
           target_size = base_size * \
               max(0.2, min(1.5, 100 / (velocity + 1)))
           self.current_velocity_size = self.current_velocity_size * 0.7 + target_size * 0.3
@@ -271,18 +271,39 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     return None
 
   def apply_effects(self) -> None:
-    if not hasattr(self, 'blur_slider') or self.raw_image is None: return
+    if not hasattr(self, 'effect_slider') or self.raw_image is None: return
     img = self.raw_image.copy()
+
+    # 1. 特殊エフェクト (修正済み: GRAY2BGR)
+    effect_type = self.effect_slider.value()
+    if effect_type == 1:  # グレースケール
+      gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+      img = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+    elif effect_type == 2:  # セピア
+      kernel = np.array([[0.272, 0.534, 0.131],
+                         [0.349, 0.686, 0.168],
+                         [0.393, 0.769, 0.189]])
+      img = cv2.transform(img, kernel)
+    elif effect_type == 3:  # エッジ抽出
+      gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+      edge = cv2.adaptiveThreshold(
+          gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 9, 8)
+      img = cv2.cvtColor(edge, cv2.COLOR_GRAY2BGR)
+
+    # 2. ぼかし
     k = self.blur_slider.value()
     if k > 1:
       k = k if k % 2 != 0 else k + 1
       img = cv2.GaussianBlur(img, (k, k), 0)
+
+    # 3. 回転
     angle = self.rotate_slider.value()
     if angle != 0:
       h, w = img.shape[:2]
       matrix = cv2.getRotationMatrix2D((w / 2, h / 2), angle, 1.0)
       img = cv2.warpAffine(img, matrix, (w, h),
                            borderValue=self.current_bg_color)
+
     self.display_image(img)
 
   def display_image(self, img: np.ndarray) -> None:
