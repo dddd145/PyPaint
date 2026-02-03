@@ -22,7 +22,7 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     self.current_bg_color = (255, 255, 255)
     self.current_brush_color = (0, 0, 0)
 
-    # 図形モード用 (0: ブラシ, 1: 矩形, 2: 円)
+    # 描画モード用 (0: ブラシ, 1: 矩形, 2: 円, 3: 塗りつぶし)
     self.draw_mode = 0
     self.is_modified = False
 
@@ -45,7 +45,7 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
 
     side_panel = PySide6.QtWidgets.QVBoxLayout()
 
-    # --- ブラシ・図形設定グループ ---
+    # --- ツール設定グループ ---
     draw_group = PySide6.QtWidgets.QGroupBox("ツール設定")
     draw_layout = PySide6.QtWidgets.QVBoxLayout()
 
@@ -54,7 +54,8 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
 
     # モード選択ボタン
     self.mode_combo = PySide6.QtWidgets.QComboBox()
-    self.mode_combo.addItems(["通常ブラシ", "矩形 (Rect)", "円 (Circle)"])
+    self.mode_combo.addItems(
+        ["通常ブラシ", "矩形 (Rect)", "円 (Circle)", "塗りつぶし (Fill)"])
     self.mode_combo.currentIndexChanged.connect(self.change_draw_mode)
     draw_layout.addWidget(PySide6.QtWidgets.QLabel("描画モード:"))
     draw_layout.addWidget(self.mode_combo)
@@ -89,7 +90,7 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     draw_group.setLayout(draw_layout)
     side_panel.addWidget(draw_group)
 
-    # --- 画像処理エフェクトグループ ---
+    # --- エフェクトグループ ---
     proc_group = PySide6.QtWidgets.QGroupBox("エフェクト")
     proc_layout = PySide6.QtWidgets.QVBoxLayout()
     self.rotate_slider = self._create_slider(
@@ -216,8 +217,22 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
 
   def mousePressEvent(self, event: PySide6.QtGui.QMouseEvent) -> None:
     if event.button() == PySide6.QtCore.Qt.LeftButton:
-      self.save_undo_state()
       pos = self.get_canvas_coordinates(event.pos())
+      if not pos: return
+
+      self.save_undo_state()
+
+      # 塗りつぶしモードの場合、クリックした瞬間に実行
+      if self.draw_mode == 3 and self.raw_image is not None:
+        color = self.current_bg_color if self.eraser_mode else self.current_brush_color
+        # OpenCVのfloodFillを使用
+        # maskは画像サイズ+2である必要がある
+        h, w = self.raw_image.shape[:2]
+        mask = np.zeros((h + 2, w + 2), np.uint8)
+        cv2.floodFill(self.raw_image, mask, (pos.x(), pos.y()), color)
+        self.apply_effects()
+        return
+
       self.last_point = pos
       self.start_point = pos
       self.last_time = time.time()
@@ -226,6 +241,9 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
   def mouseMoveEvent(self, event: PySide6.QtGui.QMouseEvent) -> None:
     if not (event.buttons() & PySide6.QtCore.Qt.LeftButton) or not self.start_point or self.raw_image is None:
       return
+
+    # 塗りつぶしモード中は移動イベントを無視
+    if self.draw_mode == 3: return
 
     current_point = self.get_canvas_coordinates(event.pos())
     if not current_point: return
@@ -253,20 +271,26 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
         self.last_point = current_point
         self.apply_effects()
     else:
-      # 図形描画（ドラッグ中はプレビューを表示するためにapply_effectsを少し特殊に呼ぶ）
+      # 図形描画プレビュー
       self.apply_effects(preview_pos=current_point)
 
   def mouseReleaseEvent(self, event: PySide6.QtGui.QMouseEvent) -> None:
     if event.button() == PySide6.QtCore.Qt.LeftButton and self.start_point and self.raw_image is not None:
+      # 塗りつぶしモードはPress時に完了しているため除外
+      if self.draw_mode == 3:
+        self.last_point = None
+        self.start_point = None
+        return
+
       end_point = self.get_canvas_coordinates(event.pos())
       if end_point:
         color = self.current_bg_color if self.eraser_mode else self.current_brush_color
         thickness = self.brush_size_slider.value()
 
-        if self.draw_mode == 1:  # 矩形確定
+        if self.draw_mode == 1:  # 矩形
           cv2.rectangle(self.raw_image, (self.start_point.x(), self.start_point.y(
           )), (end_point.x(), end_point.y()), color, thickness)
-        elif self.draw_mode == 2:  # 円確定
+        elif self.draw_mode == 2:  # 円
           center = (self.start_point.x(), self.start_point.y())
           radius = int(
               np.sqrt((end_point.x() - center[0])**2 + (end_point.y() - center[1])**2))
@@ -301,7 +325,7 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     if self.raw_image is None: return
     img = self.raw_image.copy()
 
-    # ドラッグ中の図形プレビュー描画
+    # ドラッグ中のプレビュー描画
     if preview_pos and self.start_point:
       color = self.current_bg_color if self.eraser_mode else self.current_brush_color
       thickness = self.brush_size_slider.value()
