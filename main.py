@@ -116,9 +116,25 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
         PySide6.QtCore.Qt.AlignmentFlag.AlignCenter)
     main_layout.addWidget(self.scroll_area, 4)
 
-    # ショートカット
+    # --- ショートカット設定 ---
     PySide6.QtGui.QShortcut("Ctrl+Z", self).activated.connect(self.undo)
     PySide6.QtGui.QShortcut("Ctrl+Y", self).activated.connect(self.redo)
+    PySide6.QtGui.QShortcut("B", self).activated.connect(
+        lambda: self.mode_combo.setCurrentIndex(0))
+    PySide6.QtGui.QShortcut("R", self).activated.connect(
+        lambda: self.mode_combo.setCurrentIndex(1))
+    PySide6.QtGui.QShortcut("C", self).activated.connect(
+        lambda: self.mode_combo.setCurrentIndex(2))
+    PySide6.QtGui.QShortcut("F", self).activated.connect(
+        lambda: self.mode_combo.setCurrentIndex(3))
+    PySide6.QtGui.QShortcut("E", self).activated.connect(
+        self.eraser_btn.animateClick)
+    PySide6.QtGui.QShortcut("P", self).activated.connect(
+        self.brush_mode_btn.animateClick)
+    PySide6.QtGui.QShortcut("[", self).activated.connect(
+        lambda: self.brush_size_slider.setValue(self.brush_size_slider.value() - 2))
+    PySide6.QtGui.QShortcut("]", self).activated.connect(
+        lambda: self.brush_size_slider.setValue(self.brush_size_slider.value() + 2))
 
   def _create_slider(self, label, min_v, max_v, init_v, layout):
     layout.addWidget(PySide6.QtWidgets.QLabel(label))
@@ -211,8 +227,8 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
         cv2.line(img, (self.start_point.x(), self.start_point.y()),
                  (preview_pos.x(), preview_pos.y()), color, thickness)
       elif self.draw_mode == 1:
-        cv2.rectangle(img, (self.start_point.x(), self.start_point.y(
-        )), (preview_pos.x(), preview_pos.y()), color, thickness)
+        cv2.rectangle(img, (self.start_point.x(), self.start_point.y()),
+                      (preview_pos.x(), preview_pos.y()), color, thickness)
       elif self.draw_mode == 2:
         center = (self.start_point.x(), self.start_point.y())
         radius = int(np.linalg.norm(
@@ -277,7 +293,6 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     if self.draw_mode == 0:
       modifiers = event.modifiers()
       if modifiers & PySide6.QtCore.Qt.KeyboardModifier.ShiftModifier:
-        # 直線プレビューのために再描画
         self.apply_effects(preview_pos=pos)
       else:
         color = self.current_bg_color if self.eraser_mode else self.current_brush_color
@@ -291,8 +306,8 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
               0.8 + (thick * max(0.2, min(1.2, 80 / (v + 1)))) * 0.2
           thick = int(self.current_velocity_size)
           self.last_time = now
-        cv2.line(self.raw_image, (self.last_point.x(), self.last_point.y(
-        )), (pos.x(), pos.y()), color, max(1, thick))
+        cv2.line(self.raw_image, (self.last_point.x(), self.last_point.y()),
+                 (pos.x(), pos.y()), color, max(1, thick))
         self.last_point = pos
         self.apply_effects()
     else: self.apply_effects(preview_pos=pos)
@@ -305,13 +320,12 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
         thick = self.brush_size_slider.value()
         modifiers = event.modifiers()
 
-        # 通常ブラシモードでのShift直線確定
         if self.draw_mode == 0 and modifiers & PySide6.QtCore.Qt.KeyboardModifier.ShiftModifier:
-          cv2.line(self.raw_image, (self.start_point.x(
-          ), self.start_point.y()), (pos.x(), pos.y()), color, thick)
+          cv2.line(self.raw_image, (self.start_point.x(), self.start_point.y()),
+                   (pos.x(), pos.y()), color, thick)
         elif self.draw_mode == 1:
-          cv2.rectangle(self.raw_image, (self.start_point.x(
-          ), self.start_point.y()), (pos.x(), pos.y()), color, thick)
+          cv2.rectangle(self.raw_image, (self.start_point.x(), self.start_point.y()),
+                        (pos.x(), pos.y()), color, thick)
         elif self.draw_mode == 2:
           center = (self.start_point.x(), self.start_point.y())
           radius = int(np.linalg.norm(
