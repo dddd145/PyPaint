@@ -28,7 +28,7 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     self.last_time = 0.0
     self.current_velocity_size = 5.0
 
-    # 手のひらツール用の変数
+    # 手のひら・スポイト用の変数
     self.is_panning = False
     self.last_mouse_pos = PySide6.QtCore.QPoint()
 
@@ -276,7 +276,6 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     self.canvas.setPixmap(scaled_pix)
     self.canvas.setFixedSize(scaled_pix.size())
 
-  # --- キーイベントの修正 ---
   def keyPressEvent(self, event: PySide6.QtGui.QKeyEvent) -> None:
     if event.key() == PySide6.QtCore.Qt.Key.Key_Space:
       if not event.isAutoRepeat():
@@ -293,20 +292,31 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     super().keyReleaseEvent(event)
 
   def mousePressEvent(self, event):
+    # 1. 手のひらツール
     if self.is_panning:
       self.last_mouse_pos = event.pos()
       return
 
+    # 2. 座標取得
     pos = self.get_canvas_coordinates(event.pos())
-    if pos:
-      self.save_undo_state()
-      if self.draw_mode == 3:
-        color = self.current_bg_color if self.eraser_mode else self.current_brush_color
-        cv2.floodFill(self.raw_image, None, (pos.x(), pos.y()), color)
-        self.apply_effects()
-      else:
-        self.start_point = self.last_point = pos
-        self.last_time = time.time()
+    if not pos: return
+
+    # 3. スポイト機能 (Altキー)
+    if event.modifiers() & PySide6.QtCore.Qt.KeyboardModifier.AltModifier:
+      bgr = self.raw_image[pos.y(), pos.x()]
+      self.current_brush_color = (int(bgr[0]), int(bgr[1]), int(bgr[2]))
+      # ブラシの色が変わったことを視覚的にフィードバック（必要なら）
+      return
+
+    # 4. 通常描画
+    self.save_undo_state()
+    if self.draw_mode == 3:
+      color = self.current_bg_color if self.eraser_mode else self.current_brush_color
+      cv2.floodFill(self.raw_image, None, (pos.x(), pos.y()), color)
+      self.apply_effects()
+    else:
+      self.start_point = self.last_point = pos
+      self.last_time = time.time()
 
   def mouseMoveEvent(self, event):
     if self.is_panning:
@@ -316,6 +326,10 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
       v_bar = self.scroll_area.verticalScrollBar()
       h_bar.setValue(h_bar.value() - delta.x())
       v_bar.setValue(v_bar.value() - delta.y())
+      return
+
+    # Altキーが押されている間は移動中に描画しない（スポイト待機）
+    if event.modifiers() & PySide6.QtCore.Qt.KeyboardModifier.AltModifier:
       return
 
     if not (event.buttons() & PySide6.QtCore.Qt.MouseButton.LeftButton) or not self.start_point: return
@@ -345,9 +359,7 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     else: self.apply_effects(preview_pos=pos)
 
   def mouseReleaseEvent(self, event):
-    # 描画の終了処理。手のひらモード中なら何もしない
-    if self.is_panning:
-      return
+    if self.is_panning: return
 
     if self.start_point:
       pos = self.get_canvas_coordinates(event.pos())
