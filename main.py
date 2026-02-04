@@ -28,6 +28,10 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     self.last_time = 0.0
     self.current_velocity_size = 5.0
 
+    # 手のひらツール用の変数
+    self.is_panning = False
+    self.last_mouse_pos = PySide6.QtCore.QPoint()
+
     self.undo_stack: typing.List[np.ndarray] = []
     self.redo_stack: typing.List[np.ndarray] = []
     self.max_undo = 30
@@ -221,7 +225,6 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
       color = self.current_bg_color if self.eraser_mode else self.current_brush_color
       thickness = self.brush_size_slider.value()
 
-      # ブラシモード時のShift直線プレビュー
       modifiers = PySide6.QtWidgets.QApplication.keyboardModifiers()
       if self.draw_mode == 0 and modifiers & PySide6.QtCore.Qt.KeyboardModifier.ShiftModifier:
         cv2.line(img, (self.start_point.x(), self.start_point.y()),
@@ -273,7 +276,27 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     self.canvas.setPixmap(scaled_pix)
     self.canvas.setFixedSize(scaled_pix.size())
 
+  # --- キーイベントの修正 ---
+  def keyPressEvent(self, event: PySide6.QtGui.QKeyEvent) -> None:
+    if event.key() == PySide6.QtCore.Qt.Key.Key_Space:
+      if not event.isAutoRepeat():
+        self.is_panning = True
+        self.canvas.setCursor(
+            PySide6.QtCore.Qt.CursorShape.ClosedHandCursor)
+    super().keyPressEvent(event)
+
+  def keyReleaseEvent(self, event: PySide6.QtGui.QKeyEvent) -> None:
+    if event.key() == PySide6.QtCore.Qt.Key.Key_Space:
+      if not event.isAutoRepeat():
+        self.is_panning = False
+        self.canvas.setCursor(PySide6.QtCore.Qt.CursorShape.ArrowCursor)
+    super().keyReleaseEvent(event)
+
   def mousePressEvent(self, event):
+    if self.is_panning:
+      self.last_mouse_pos = event.pos()
+      return
+
     pos = self.get_canvas_coordinates(event.pos())
     if pos:
       self.save_undo_state()
@@ -286,6 +309,15 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
         self.last_time = time.time()
 
   def mouseMoveEvent(self, event):
+    if self.is_panning:
+      delta = event.pos() - self.last_mouse_pos
+      self.last_mouse_pos = event.pos()
+      h_bar = self.scroll_area.horizontalScrollBar()
+      v_bar = self.scroll_area.verticalScrollBar()
+      h_bar.setValue(h_bar.value() - delta.x())
+      v_bar.setValue(v_bar.value() - delta.y())
+      return
+
     if not (event.buttons() & PySide6.QtCore.Qt.MouseButton.LeftButton) or not self.start_point: return
     pos = self.get_canvas_coordinates(event.pos())
     if not pos: return
@@ -306,13 +338,17 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
               0.8 + (thick * max(0.2, min(1.2, 80 / (v + 1)))) * 0.2
           thick = int(self.current_velocity_size)
           self.last_time = now
-        cv2.line(self.raw_image, (self.last_point.x(), self.last_point.y()),
-                 (pos.x(), pos.y()), color, max(1, thick))
+        cv2.line(self.raw_image, (self.last_point.x(), self.last_point.y(
+        )), (pos.x(), pos.y()), color, max(1, thick))
         self.last_point = pos
         self.apply_effects()
     else: self.apply_effects(preview_pos=pos)
 
   def mouseReleaseEvent(self, event):
+    # 描画の終了処理。手のひらモード中なら何もしない
+    if self.is_panning:
+      return
+
     if self.start_point:
       pos = self.get_canvas_coordinates(event.pos())
       if pos:
@@ -321,11 +357,11 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
         modifiers = event.modifiers()
 
         if self.draw_mode == 0 and modifiers & PySide6.QtCore.Qt.KeyboardModifier.ShiftModifier:
-          cv2.line(self.raw_image, (self.start_point.x(), self.start_point.y()),
-                   (pos.x(), pos.y()), color, thick)
+          cv2.line(self.raw_image, (self.start_point.x(
+          ), self.start_point.y()), (pos.x(), pos.y()), color, thick)
         elif self.draw_mode == 1:
-          cv2.rectangle(self.raw_image, (self.start_point.x(), self.start_point.y()),
-                        (pos.x(), pos.y()), color, thick)
+          cv2.rectangle(self.raw_image, (self.start_point.x(
+          ), self.start_point.y()), (pos.x(), pos.y()), color, thick)
         elif self.draw_mode == 2:
           center = (self.start_point.x(), self.start_point.y())
           radius = int(np.linalg.norm(
