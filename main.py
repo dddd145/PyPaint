@@ -177,10 +177,12 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
 
   def change_draw_mode(self, index): self.draw_mode = index
 
+  # 筆圧感度モードの切り替え
   def toggle_brush_mode(self):
     self.pressure_brush_mode = self.brush_mode_btn.isChecked()
     self.brush_mode_btn.setText(
         "筆圧感度: ON" if self.pressure_brush_mode else "筆圧感度: OFF")
+  # 消しゴムモードの切り替え
 
   def toggle_eraser(self):
     self.eraser_mode = self.eraser_btn.isChecked()
