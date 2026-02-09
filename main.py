@@ -108,12 +108,12 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     draw_group.setLayout(draw_layout)
     side_panel.addWidget(draw_group)
 
-    # --- エフェクト設定パネル（スライダーから選択式へ変更） ---
+    # --- エフェクト設定パネル ---
     proc_group = PySide6.QtWidgets.QGroupBox("エフェクト")
     proc_layout = PySide6.QtWidgets.QVBoxLayout()
 
-    # 回転とぼかしはパラメータ調整が必要なためスライダーを維持、特殊効果のみを選択式に変更
-    self.rotate_slider = self._create_slider("回転", -180, 180, 0, proc_layout)
+    self.rotate_slider = self._create_slider(
+        "回転", -180, 180, 0, proc_layout)
     self.blur_slider = self._create_slider("ぼかし", 1, 51, 1, proc_layout)
 
     proc_layout.addWidget(PySide6.QtWidgets.QLabel("特殊効果:"))
@@ -124,6 +124,21 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
 
     proc_group.setLayout(proc_layout)
     side_panel.addWidget(proc_group)
+
+    # --- [NEW] キャンバス操作パネル ---
+    canvas_op_group = PySide6.QtWidgets.QGroupBox("キャンバス操作")
+    canvas_op_layout = PySide6.QtWidgets.QVBoxLayout()
+
+    self.resize_btn = PySide6.QtWidgets.QPushButton("リサイズ (画像解像度)")
+    self.resize_btn.clicked.connect(self.resize_image_dialog)
+    canvas_op_layout.addWidget(self.resize_btn)
+
+    self.crop_btn = PySide6.QtWidgets.QPushButton("選択範囲でトリミング")
+    self.crop_btn.clicked.connect(self.crop_to_selection)
+    canvas_op_layout.addWidget(self.crop_btn)
+
+    canvas_op_group.setLayout(canvas_op_layout)
+    side_panel.addWidget(canvas_op_group)
 
     self.load_btn = PySide6.QtWidgets.QPushButton("読み込み")
     self.load_btn.clicked.connect(self.load_file)
@@ -176,6 +191,8 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
         "Ctrl+C", self).activated.connect(self.copy_selection)
     PySide6.QtGui.QShortcut(
         "Ctrl+V", self).activated.connect(self.paste_selection)
+    PySide6.QtGui.QShortcut(
+        "Ctrl+Shift+X", self).activated.connect(self.crop_to_selection)
 
   def _create_slider(self, label, min_v, max_v, init_v, layout):
     layout.addWidget(PySide6.QtWidgets.QLabel(label))
@@ -204,6 +221,46 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     self.redo_stack.clear()
     self.zoom_factor = 1.0
     self.is_modified = False
+    self.apply_effects()
+
+  # --- [NEW] リサイズ・トリミング機能の実装 ---
+  def resize_image_dialog(self):
+    if self.raw_image is None: return
+    h, w = self.raw_image.shape[:2]
+
+    # 幅の入力
+    new_w, ok1 = PySide6.QtWidgets.QInputDialog.getInt(
+        self, "リサイズ", "新しい幅 (px):", w, 1, 10000)
+    if not ok1: return
+
+    # 高の入力
+    new_h, ok2 = PySide6.QtWidgets.QInputDialog.getInt(
+        self, "リサイズ", "新しい高さ (px):", h, 1, 10000)
+    if not ok2: return
+
+    self.save_undo_state()
+    self.raw_image = cv2.resize(
+        self.raw_image, (new_w, new_h), interpolation=cv2.INTER_AREA)
+    self.apply_effects()
+
+  def crop_to_selection(self):
+    if self.raw_image is None or self.selection_rect is None:
+      PySide6.QtWidgets.QMessageBox.information(
+          self, "情報", "トリミングする範囲を選択してください。")
+      return
+
+    r = self.selection_rect.normalized()
+    img_h, img_w = self.raw_image.shape[:2]
+
+    # 範囲が画像内にあるかクリッピングして確認
+    x1, y1 = max(0, r.left()), max(0, r.top())
+    x2, y2 = min(img_w, r.right()), min(img_h, r.bottom())
+
+    if x2 <= x1 or y2 <= y1: return
+
+    self.save_undo_state()
+    self.raw_image = self.raw_image[y1:y2, x1:x2].copy()
+    self.selection_rect = None
     self.apply_effects()
 
   def get_canvas_coordinates(self, pos: PySide6.QtCore.QPoint) -> typing.Optional[PySide6.QtCore.QPoint]:
@@ -350,8 +407,10 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
       rect_y = (v_bar.value() / total_h) * result_nav.height()
       rect_w = (view_w / total_w) * result_nav.width()
       rect_h = (view_h / total_h) * result_nav.height()
-      painter.setPen(PySide6.QtGui.QPen(PySide6.QtGui.QColor(255, 0, 0), 2))
-      painter.drawRect(PySide6.QtCore.QRectF(rect_x, rect_y, rect_w, rect_h))
+      painter.setPen(PySide6.QtGui.QPen(
+          PySide6.QtGui.QColor(255, 0, 0), 2))
+      painter.drawRect(PySide6.QtCore.QRectF(
+          rect_x, rect_y, rect_w, rect_h))
     painter.end()
     self.nav_label.setPixmap(result_nav)
 
@@ -375,7 +434,8 @@ class AdvancedImageApp(PySide6.QtWidgets.QMainWindow):
     if event.key() == PySide6.QtCore.Qt.Key.Key_Space:
       if not event.isAutoRepeat():
         self.is_panning = True
-        self.canvas.setCursor(PySide6.QtCore.Qt.CursorShape.ClosedHandCursor)
+        self.canvas.setCursor(
+            PySide6.QtCore.Qt.CursorShape.ClosedHandCursor)
     super().keyPressEvent(event)
 
   def keyReleaseEvent(self, event: PySide6.QtGui.QKeyEvent) -> None:
